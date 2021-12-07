@@ -1,5 +1,7 @@
 import cheerio from "cheerio";
 import fetch from "node-fetch";
+import fs from "fs";
+import cliProgress from "cli-progress";
 
 const options = {};
 
@@ -13,6 +15,7 @@ async function fetchPage(index) {
 }
 
 async function getAllUsers() {
+  console.log("Fetching users...");
   const users = [];
   let precLength = -1;
   for (let index = 1; precLength < users.length; index++) {
@@ -26,6 +29,9 @@ async function getAllUsers() {
         if (i % 2) users.push(`https://github.com${username}`);
       });
   }
+  fs.writeFile(`users.txt`, users.join("\n"), (e) =>
+    console.log(e ? "error" : "ok")
+  );
   return users;
 }
 
@@ -45,9 +51,45 @@ async function getWeekContributions(user) {
   const data = await response.text();
   const $ = cheerio.load(data);
   let day = $(`[data-date="${today()}"]`);
-  for(let i = 0; i<7; i++){
-    contributions.push(day.attr('data-count'));
+  for (let i = 0; i < 7; i++) {
+    contributions.push(day.attr("data-count"));
     day = day.prev();
   }
   return contributions.reverse();
+}
+
+async function getRepositoriesByProject(projectName) {
+  const repositories = [];
+  const users = (await getAllUsers()).map(
+    (url) => `${url}?tab=repositories&q=${projectName}`
+  );
+  const bar = new cliProgress.SingleBar({}, cliProgress.Presets.shades_classic);
+  console.log("Fetching repositories...");
+  bar.start(users.length, 0);
+  for (let i = 0; i < users.length; i++) {
+    const profile = users[i];
+    const response = await fetch(profile);
+    const page = await response.text();
+    const $ = cheerio.load(page);
+    $("a")
+      .filter(function () {
+        return $(this).attr("itemprop") === "name codeRepository";
+      })
+      .each(function () {
+        const repository = $(this).attr("href");
+        repositories.push(`https://github.com${repository}`);
+      });
+    bar.update(i);
+  }
+  bar.update(users.length);
+  bar.stop();
+  return repositories;
+}
+
+async function saveRepositories(projectName) {
+  const repositories = await getRepositoriesByProject(projectName);
+  fs.writeFile(`${projectName}.txt`, repositories.join("\n"), (e) =>
+    console.log(e ? "error" : "ok")
+  );
+  console.log(repositories);
 }
